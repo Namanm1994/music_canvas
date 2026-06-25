@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>3D Gravity Grid Sound Dots</title>
+  <title>Spaced Looping Harmonies Gravity Grid</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/addons/p5.sound.min.js"></script>
   <style>
@@ -31,17 +31,40 @@
       colorMode(HSB, 360, 100, 100, 255); 
       
       synth = new p5.PolySynth();
-      synth.setADSR(0.05, 0.1, 0.1, 0.3); 
+      synth.setADSR(0.04, 0.08, 0.1, 0.25); 
 
       let spacing = 12;
       
+      // The note changes every 'noteZoneSize' dots instead of every single dot
+      let noteZoneSize = 6; 
+      
+      // A beautiful 2-octave C Major Pentatonic Scale
+      const musicalScale = [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74];
+      
       for (let x = spacing; x < width; x += spacing) {
         for (let y = spacing; y < height; y += spacing) {
+          
+          let col = floor(x / spacing);
+          let row = floor(y / spacing);
+          
+          // --- THE SPACED LOOPING MATH ---
+          // Grouping columns and rows into larger blocks so pitches stretch out
+          let musicalCol = floor(col / noteZoneSize);
+          let musicalRow = floor(row / noteZoneSize);
+          
+          let scaleIndex = (musicalCol - musicalRow) % musicalScale.length;
+          
+          if (scaleIndex < 0) {
+            scaleIndex += musicalScale.length;
+          }
+          
+          let assignedMidiNote = musicalScale[scaleIndex];
+          
           let h = map(x, 0, width, 0, 360); 
           let b = map(y, 0, height, 100, 50); 
           let dotColor = color(h, 85, b); 
           
-          dots.push(new Dot(x, y, dotColor));
+          dots.push(new Dot(x, y, dotColor, assignedMidiNote));
         }
       }
     }
@@ -52,35 +75,33 @@
       for (let dot of dots) {
         dot.checkHover(mouseX, mouseY);
         dot.update();
-        dot.display(mouseX, mouseY); // Pass mouse position to the display method
+        dot.display(mouseX, mouseY); 
       }
     }
 
     class Dot {
-      constructor(x, y, c) {
+      constructor(x, y, c, note) {
         this.x = x;
         this.y = y;
         this.baseRadius = 2; 
         this.glowRadius = 14;  
         this.currentRadius = this.baseRadius;
         this.targetColor = c;  
+        this.midiNote = note; 
         this.isGlowing = false;
         this.glowIntensity = 0;
         this.cooldown = 0;
       }
 
       checkHover(mx, my) {
-        // We calculate note triggers based on original un-warped physics coordinates 
-        // to maintain pixel-perfect cursor accuracy.
         let d = dist(this.x, this.y, mx, my);
         
         if (d < 8 && this.cooldown === 0) {
           this.isGlowing = true;
           this.cooldown = 45; 
 
-          if (millis() - lastNoteTime > 40) {
-            let midiNote = map(this.y, 0, height, 85, 45); 
-            synth.play(midiToFreq(midiNote), 0.05, 0, 0.15); 
+          if (millis() - lastNoteTime > 35) {
+            synth.play(midiToFreq(this.midiNote), 0.05, 0, 0.15); 
             lastNoteTime = millis(); 
           }
         }
@@ -104,36 +125,26 @@
       display(mx, my) {
         noStroke();
         
-        // --- GRAVITY WARP MATH ---
         let renderX = this.x;
         let renderY = this.y;
         let sizeModifier = 1.0;
         
         let d = dist(this.x, this.y, mx, my);
-        let gravityRadius = 160; // How far away the "pull" of the cursor reaches
+        let gravityRadius = 160; 
         
         if (d < gravityRadius) {
-          // 1. Calculate the pull strength using a sine curve.
-          // Pull is 0 at the cursor tip, peaks mid-way, and drops to 0 at the edge.
           let pullFactor = sin(map(d, 0, gravityRadius, 0, PI)) * 12; 
-          
-          // 2. Find the angle pointing from this dot straight to the mouse cursor
           let angle = atan2(my - this.y, mx - this.x);
           
-          // 3. Shift the rendered coordinates along that angle vector
           renderX += cos(angle) * pullFactor;
           renderY += sin(angle) * pullFactor;
           
-          // 4. Shrink the dot size linearly as it gets closer to the cursor tip 
-          // to simulate it "sinking" deeper away from the camera lens.
           sizeModifier = map(d, 0, gravityRadius, 0.5, 1.0);
         }
 
-        // Apply depth scaling to the visual radii
         let displayGlowRadius = this.currentRadius * sizeModifier;
         let displayBaseRadius = this.baseRadius * sizeModifier;
 
-        // Draw the glowing aura at the warped coordinates
         if (this.glowIntensity > 5) {
           let c = color(this.targetColor);
           c.setAlpha(this.glowIntensity * 0.4); 
@@ -141,7 +152,6 @@
           ellipse(renderX, renderY, displayGlowRadius * 2);
         }
 
-        // Draw the black resting dot at the warped coordinates
         if (this.glowIntensity > 150) {
           fill(this.targetColor); 
         } else {
