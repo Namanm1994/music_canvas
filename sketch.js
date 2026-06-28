@@ -1,8 +1,6 @@
 let dots = [];
 let lastNoteTime = 0;
-let decoderModel;
-let modelReady = false;
-let currentTimbreWeights = [0.2, 0.2, 0.2, 0.2, 0.2]; // Fallback neural coefficients
+let currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0]; // Default: Pure fundamental
 
 // Continuous Parametric DDSP Synthesizer Architecture
 let ddspEngine;
@@ -11,13 +9,10 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 255);
   
-  // 1. Compile the Generative Latent Decoder Network in-browser
-  buildNeuralDecoder();
-  
-  // 2. Instantiate the DDSP Additive Harmonic Synthesizer
+  // Initialize the DDSP Additive Harmonic Synthesizer
   ddspEngine = new ParametricDDSP();
   
-  // 3. Setup the Spaced 2D Looping Musical Grid
+  // Setup the Spaced 2D Looping Musical Grid
   let spacing = 12;
   let noteZoneSize = 6; // Note spans 6 dots before shifting pitch
   const musicalScale = [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74]; // 2-Octave Pentatonic
@@ -44,69 +39,78 @@ function setup() {
   }
 }
 
-function buildNeuralDecoder() {
-  // Instantiates a multi-layer feedforward neural network structure
-  decoderModel = tf.sequential();
-  
-  // Hidden Layer 1: Ingests 2D Latent Vector Space [Latent_X, Latent_Y]
-  decoderModel.add(tf.layers.dense({
-    units: 16,
-    activation: 'tanh',
-    inputShape: [2],
-    kernelInitializer: 'randomNormal'
-  }));
-  
-  // Hidden Layer 2: Maps complex non-linear acoustic textures
-  decoderModel.add(tf.layers.dense({
-    units: 12,
-    activation: 'relu',
-    kernelInitializer: 'randomNormal'
-  }));
-  
-  // Output Layer: Generates 5 precise structural synthesis coefficients
-  decoderModel.add(tf.layers.dense({
-    units: 5,
-    activation: 'sigmoid',
-    kernelInitializer: 'randomNormal'
-  }));
-  
-  modelReady = true;
-}
-
 function draw() {
   background(0, 0, 100); 
 
-  // 1. Run Real-Time Generative Inference 
-  if (modelReady) {
-    navigateLatentSpace();
-  }
+  // 1. Calculate Radial Harmonics based on Cursor Position
+  calculateRadialHarmonics();
 
-  // 2. Process and Render Visual Gravity Grid
+  // 2. Draw the 40% Acoustic Safe Zone Guideline
+  drawRadialGuidelines();
+
+  // 3. Process and Render Visual Gravity Grid
   for (let dot of dots) {
     dot.checkHover(mouseX, mouseY);
     dot.update();
     dot.display(mouseX, mouseY); 
   }
   
-  // 3. Draw Telemetry Dashboard Overlay
+  // 4. Draw Telemetry Dashboard Overlay
   drawTelemetryHUD();
 }
 
-function navigateLatentSpace() {
-  // Wraps calculation inside tf.tidy to immediately garbage-collect WebGL textures and prevent memory leaks
-  tf.tidy(() => {
-    let normX = map(mouseX, 0, width, 0.0, 1.0, true);
-    let normY = map(mouseY, 0, height, 0.0, 1.0, true);
-    
-    let inputTensor = tf.tensor2d([[normX, normY]]);
-    let outputTensor = decoderModel.predict(inputTensor);
-    
-    // Unpack tensor array values into standard JavaScript array execution thread
-    currentTimbreWeights = outputTensor.dataSync();
-  });
+function calculateRadialHarmonics() {
+  let centerX = width / 2;
+  let centerY = height / 2;
   
-  // Feed output parameter matrices straight into the dynamic voice synthesis channels
+  // Max possible distance from center to a corner
+  let maxRadius = dist(0, 0, centerX, centerY);
+  let currentDist = dist(mouseX, mouseY, centerX, centerY);
+  
+  // Normalize radial distance from 0.0 (center) to 1.0 (extreme corner)
+  let normRadialDist = constrain(currentDist / maxRadius, 0.0, 1.0);
+  
+  let safeZoneThreshold = 0.40; // 40% Radially
+  
+  if (normRadialDist <= safeZoneThreshold) {
+    // --- ZONE 1: THE CORE (Base Tones Only) ---
+    currentTimbreWeights[0] = 1.0; // Fundamental (1x) is fully open
+    currentTimbreWeights[1] = 0.0; // 2x Muted
+    currentTimbreWeights[2] = 0.0; // 3x Muted
+    currentTimbreWeights[3] = 0.0; // 4x Muted
+    currentTimbreWeights[4] = 0.0; // Noise Muted
+  } else {
+    // --- ZONE 2: THE ACOUSTIC EXPANSION ---
+    // Scale the factor from 0.0 (at the 40% line) to 1.0 (at the extreme edge)
+    let edgeFactor = map(normRadialDist, safeZoneThreshold, 1.0, 0.0, 1.0);
+    
+    // Systematic Harmonic Layering:
+    currentTimbreWeights[0] = 1.0 - (edgeFactor * 0.3); // Fundamental drops slightly to let overtones pierce through
+    currentTimbreWeights[1] = constrain(map(edgeFactor, 0.0, 0.5, 0.0, 1.0), 0.0, 1.0); // 2x fades in first
+    currentTimbreWeights[2] = constrain(map(edgeFactor, 0.2, 0.8, 0.0, 1.0), 0.0, 1.0); // 3x follows
+    currentTimbreWeights[3] = constrain(map(edgeFactor, 0.5, 1.0, 0.0, 1.0), 0.0, 1.0); // 4x comes in last
+    
+    // Add a tiny bit of chaotic noise/friction at the very extremes
+    currentTimbreWeights[4] = edgeFactor > 0.7 ? map(edgeFactor, 0.7, 1.0, 0.0, 0.8) : 0.0;
+  }
+  
+  // Feed output parameters straight into the synthesizer voice lines
   ddspEngine.morphTimbre(currentTimbreWeights);
+}
+
+function drawRadialGuidelines() {
+  let centerX = width / 2;
+  let centerY = height / 2;
+  let maxRadius = dist(0, 0, centerX, centerY);
+  let safeZoneDiameter = maxRadius * 0.40 * 2;
+  
+  // Draw a clean, minimal dashed boundary line for the 40% threshold
+  noFill();
+  stroke(0, 0, 80, 150);
+  strokeWeight(1);
+  drawingContext.setLineDash([4, 4]); // Creates dashed look
+  ellipse(centerX, centerY, safeZoneDiameter);
+  drawingContext.setLineDash([]); // Reset dash settings so it doesn't affect dots
 }
 
 class ParametricDDSP {
@@ -122,7 +126,7 @@ class ParametricDDSP {
       this.harmonics.push(osc);
     }
     
-    // Component B: Residual Ambient Noise Shaper (Simulates breath/bowing/friction friction elements)
+    // Component B: Residual Ambient Noise Shaper (Simulates friction/breath at canvas edges)
     this.noiseComponent = new p5.Noise('pink');
     this.noiseComponent.amp(0);
     this.noiseComponent.start();
@@ -132,18 +136,15 @@ class ParametricDDSP {
   }
   
   morphTimbre(weights) {
-    // Gracefully bleed amplitude over time to simulate custom acoustic decays
-    this.ampEnvelope = lerp(this.ampEnvelope, 0, 0.04); 
+    this.ampEnvelope = lerp(this.ampEnvelope, 0, 0.04); // Natural note decay profile
     
     if (this.currentBaseFreq > 0) {
-      // Re-render frequency multipliers and map harmonic energy levels from model weights
       for (let i = 0; i < this.numHarmonics; i++) {
         this.harmonics[i].freq(this.currentBaseFreq * (i + 1));
         let targetingAmp = weights[i] * 0.16 * this.ampEnvelope;
-        this.harmonics[i].amp(targetingAmp, 0.02); // 20ms smoothing to eliminate digital audio clipping
+        this.harmonics[i].amp(targetingAmp, 0.02); // 20ms click prevention smoothing
       }
       
-      // Control noise injection mix balance using weight channel index 4
       let noiseTargetAmp = weights[4] * 0.03 * this.ampEnvelope;
       this.noiseComponent.amp(noiseTargetAmp, 0.02);
     }
@@ -151,7 +152,7 @@ class ParametricDDSP {
   
   triggerAttack(midiNote) {
     this.currentBaseFreq = midiToFreq(midiNote);
-    this.ampEnvelope = 1.0; // Reset note strike velocity
+    this.ampEnvelope = 1.0; // Peak strike volume
   }
 }
 
@@ -239,29 +240,41 @@ class Dot {
 }
 
 function drawTelemetryHUD() {
-  // Semi-transparent panel
   fill(0, 0, 15, 200);
-  rect(15, 15, 320, 130, 8);
+  rect(15, 15, 320, 135, 8);
   
   fill(0, 0, 100);
   noStroke();
   textSize(11);
   textFont('Courier New');
-  text("UNSUPERVISED AUDIO LATENT SPACE NAVIGATION", 25, 35);
-  text(`Latent Vector Z0 (X): ${map(mouseX, 0, width, 0, 1, true).toFixed(4)}`, 25, 55);
-  text(`Latent Vector Z1 (Y): ${map(mouseY, 0, height, 0, 1, true).toFixed(4)}`, 25, 75);
+  text("RADIAL HARMONIC TIMBRE NAVIGATION", 25, 35);
   
-  text("Model Decoded DDSP Coefficients Matrix:", 25, 100);
+  let centerX = width / 2;
+  let centerY = height / 2;
+  let maxRadius = dist(0, 0, centerX, centerY);
+  let currentDist = dist(mouseX, mouseY, centerX, centerY);
+  let normRadialDist = constrain(currentDist / maxRadius, 0, 1);
   
-  // Render real-time bar graphs indicating current model inference output array
+  text(`Radial Position: ${(normRadialDist * 100).toFixed(1)}% from Center`, 25, 55);
+  
+  if (normRadialDist <= 0.40) {
+    fill(140, 85, 95);
+    text("CURRENT ZONE: CORE SAFE ZONE (Base Tones)", 25, 75);
+  } else {
+    fill(15, 85, 95);
+    text("CURRENT ZONE: HARMONIC EXPANSION EDGE", 25, 75);
+  }
+  
+  fill(0, 0, 100);
+  text("Active DDSP Harmonic Modifiers:", 25, 102);
+  
   for(let i = 0; i < currentTimbreWeights.length; i++) {
     let barWidth = currentTimbreWeights[i] * 45;
     
-    // Distinguish harmonic channels from the noise element color-wise
-    if (i === 4) fill(0, 80, 90); // Residual Noise Channel
-    else fill(i * 50 + 180, 85, 95); // Harmonic Channels
+    if (i === 4) fill(0, 80, 90); // Residual edge noise
+    else fill(i * 45 + 200, 85, 95); // Harmonics 1x, 2x, 3x, 4x
     
-    rect(25 + (i * 58), 110, barWidth, 10, 2);
+    rect(25 + (i * 58), 112, barWidth, 10, 2);
   }
 }
 
