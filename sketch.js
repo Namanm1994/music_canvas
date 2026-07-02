@@ -1,21 +1,34 @@
 let dots = [];
-let lastNoteTime = 0;
-let currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0]; // Default: Pure fundamental
-
-// Continuous Parametric DDSP Synthesizer Architecture
 let ddspEngine;
+
+// --- MARKOV CHAIN AI PARAMETERS ---
+const musicalScale = [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74]; // 2-Octave Pentatonic
+let transitionMatrix = []; // The active, warped probability table
+let currentNoteIndex = 0;  // What note the AI is currently processing
+let activeMidiNote = -1;   // The note actively ringing out across the canvas
+
+let lastStepTime = 0;      // Rhythmic clock timer
+let currentTempo = 300;    // Time between notes in milliseconds
+
+// --- SYNTH PARAMETERS ---
+let currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0];
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 255);
   
-  // Initialize the DDSP Additive Harmonic Synthesizer
+  // 1. Initialize our Parametric Synth
   ddspEngine = new ParametricDDSP();
   
-  // Setup the Spaced 2D Looping Musical Grid
+  // 2. Algorithmically build the baseline Markov Matrix 
+  // Notes naturally prefer moving to immediate musical neighbors or perfect intervals
+  for (let i = 0; i < musicalScale.length; i++) {
+    transitionMatrix[i] = new Array(musicalScale.length).fill(0);
+  }
+  
+  // 3. Populate the visual gravity grid
   let spacing = 12;
-  let noteZoneSize = 6; // Note spans 6 dots before shifting pitch
-  const musicalScale = [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74]; // 2-Octave Pentatonic
+  let noteZoneSize = 6; 
   
   for (let x = spacing; x < width; x += spacing) {
     for (let y = spacing; y < height; y += spacing) {
@@ -42,60 +55,110 @@ function setup() {
 function draw() {
   background(0, 0, 100); 
 
-  // 1. Calculate Radial Harmonics based on Cursor Position
-  calculateRadialHarmonics();
+  // 1. Unsupervised Matrix Warping & Audio Morphing based on Mouse Position
+  warpMatrixAndTimbre();
 
-  // 2. Draw the 40% Acoustic Safe Zone Guideline
+  // 2. The AI Clock: Trigger the next note based on the updated tempo
+  if (millis() - lastStepTime > currentTempo) {
+    aiPlayNextNote();
+    lastStepTime = millis();
+  }
+
+  // 3. Draw Visual Radial Safe-Zone Guideline (40% boundary line)
   drawRadialGuidelines();
 
-  // 3. Process and Render Visual Gravity Grid
+  // 4. Process Visual Grid Animations
   for (let dot of dots) {
-    dot.checkHover(mouseX, mouseY);
+    dot.checkAIActivation(activeMidiNote);
     dot.update();
     dot.display(mouseX, mouseY); 
   }
   
-  // 4. Draw Telemetry Dashboard Overlay
+  // 5. Draw Telemetry Dashboard Overlay
   drawTelemetryHUD();
 }
 
-function calculateRadialHarmonics() {
+function warpMatrixAndTimbre() {
   let centerX = width / 2;
   let centerY = height / 2;
-  
-  // Max possible distance from center to a corner
   let maxRadius = dist(0, 0, centerX, centerY);
   let currentDist = dist(mouseX, mouseY, centerX, centerY);
   
-  // Normalize radial distance from 0.0 (center) to 1.0 (extreme corner)
+  // Normalized distance: 0.0 (center) to 1.0 (extreme corner)
   let normRadialDist = constrain(currentDist / maxRadius, 0.0, 1.0);
+  let safeZoneThreshold = 0.40;
   
-  let safeZoneThreshold = 0.40; // 40% Radially
-  
+  // --- STEP A: WARP THE MARKOV AI BRAIN ---
+  let chaosFactor = 0;
   if (normRadialDist <= safeZoneThreshold) {
-    // --- ZONE 1: THE CORE (Base Tones Only) ---
-    currentTimbreWeights[0] = 1.0; // Fundamental (1x) is fully open
-    currentTimbreWeights[1] = 0.0; // 2x Muted
-    currentTimbreWeights[2] = 0.0; // 3x Muted
-    currentTimbreWeights[3] = 0.0; // 4x Muted
-    currentTimbreWeights[4] = 0.0; // Noise Muted
+    // Core Zone: Smooth, deliberate tempo
+    currentTempo = 350; 
+    chaosFactor = 0.0; // Perfect mathematical structure
   } else {
-    // --- ZONE 2: THE ACOUSTIC EXPANSION ---
-    // Scale the factor from 0.0 (at the 40% line) to 1.0 (at the extreme edge)
+    // Edge Zone: Tempo accelerates wildly as you push outward
     let edgeFactor = map(normRadialDist, safeZoneThreshold, 1.0, 0.0, 1.0);
+    currentTempo = map(edgeFactor, 0.0, 1.0, 350, 80); // Speeds up down to a blistering 80ms
+    chaosFactor = edgeFactor; // Inject pure probability entropy
+  }
+
+  // Re-calculate the transition matrix probabilities on the fly
+  for (let i = 0; i < musicalScale.length; i++) {
+    let rowTotal = 0;
+    for (let j = 0; j < musicalScale.length; j++) {
+      // Base structural melody behavior (prefers moving up or down by 1 scale step)
+      let structuralProb = 0;
+      if (abs(i - j) === 1 || abs(i - j) === 3) structuralProb = 0.8;
+      if (i === j) structuralProb = 0.1; // Occasional note repeats
+      
+      // Chaos behavior: completely flat uniform randomness
+      let randomProb = 1.0 / musicalScale.length;
+      
+      // Linearly blend structure and chaos based on your cursor position
+      transitionMatrix[i][j] = lerp(structuralProb, randomProb, chaosFactor);
+      rowTotal += transitionMatrix[i][j];
+    }
     
-    // Systematic Harmonic Layering:
-    currentTimbreWeights[0] = 1.0 - (edgeFactor * 0.3); // Fundamental drops slightly to let overtones pierce through
-    currentTimbreWeights[1] = constrain(map(edgeFactor, 0.0, 0.5, 0.0, 1.0), 0.0, 1.0); // 2x fades in first
-    currentTimbreWeights[2] = constrain(map(edgeFactor, 0.2, 0.8, 0.0, 1.0), 0.0, 1.0); // 3x follows
-    currentTimbreWeights[3] = constrain(map(edgeFactor, 0.5, 1.0, 0.0, 1.0), 0.0, 1.0); // 4x comes in last
-    
-    // Add a tiny bit of chaotic noise/friction at the very extremes
-    currentTimbreWeights[4] = edgeFactor > 0.7 ? map(edgeFactor, 0.7, 1.0, 0.0, 0.8) : 0.0;
+    // Normalize row back to valid probability distribution summing to 1.0
+    for (let j = 0; j < musicalScale.length; j++) {
+      transitionMatrix[i][j] /= rowTotal;
+    }
+  }
+
+  // --- STEP B: WARP THE DDSP SYNTH AUDIO TIMBRE ---
+  if (normRadialDist <= safeZoneThreshold) {
+    currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0]; // Pure fundamental tone
+  } else {
+    let edgeFactor = map(normRadialDist, safeZoneThreshold, 1.0, 0.0, 1.0);
+    currentTimbreWeights[0] = 1.0 - (edgeFactor * 0.4);
+    currentTimbreWeights[1] = constrain(map(edgeFactor, 0.0, 0.5, 0.0, 1.0), 0.0, 1.0);
+    currentTimbreWeights[2] = constrain(map(edgeFactor, 0.2, 0.8, 0.0, 1.0), 0.0, 1.0);
+    currentTimbreWeights[3] = constrain(map(edgeFactor, 0.5, 1.0, 0.0, 1.0), 0.0, 1.0);
+    currentTimbreWeights[4] = edgeFactor > 0.6 ? map(edgeFactor, 0.6, 1.0, 0.0, 0.7) : 0.0;
   }
   
-  // Feed output parameters straight into the synthesizer voice lines
   ddspEngine.morphTimbre(currentTimbreWeights);
+}
+
+function aiPlayNextNote() {
+  // Unsupervised choice generation based on current node row probabilities
+  let probabilities = transitionMatrix[currentNoteIndex];
+  let r = random(1.0);
+  let cumulativeProbability = 0;
+  let nextIndex = 0;
+  
+  for (let i = 0; i < probabilities.length; i++) {
+    cumulativeProbability += probabilities[i];
+    if (r <= cumulativeProbability) {
+      nextIndex = i;
+      break;
+    }
+  }
+  
+  currentNoteIndex = nextIndex;
+  activeMidiNote = musicalScale[currentNoteIndex];
+  
+  // Direct execution down the DDSP synthesis thread
+  ddspEngine.triggerAttack(activeMidiNote);
 }
 
 function drawRadialGuidelines() {
@@ -104,13 +167,12 @@ function drawRadialGuidelines() {
   let maxRadius = dist(0, 0, centerX, centerY);
   let safeZoneDiameter = maxRadius * 0.40 * 2;
   
-  // Draw a clean, minimal dashed boundary line for the 40% threshold
   noFill();
-  stroke(0, 0, 80, 150);
+  stroke(0, 0, 85, 120);
   strokeWeight(1);
-  drawingContext.setLineDash([4, 4]); // Creates dashed look
+  drawingContext.setLineDash([4, 4]); 
   ellipse(centerX, centerY, safeZoneDiameter);
-  drawingContext.setLineDash([]); // Reset dash settings so it doesn't affect dots
+  drawingContext.setLineDash([]); 
 }
 
 class ParametricDDSP {
@@ -118,7 +180,6 @@ class ParametricDDSP {
     this.numHarmonics = 4;
     this.harmonics = [];
     
-    // Component A: Pure Additive Sinusoidal Harmonics (F0, 2F0, 3F0, 4F0)
     for (let i = 0; i < this.numHarmonics; i++) {
       let osc = new p5.Oscillator('sine');
       osc.amp(0);
@@ -126,7 +187,6 @@ class ParametricDDSP {
       this.harmonics.push(osc);
     }
     
-    // Component B: Residual Ambient Noise Shaper (Simulates friction/breath at canvas edges)
     this.noiseComponent = new p5.Noise('pink');
     this.noiseComponent.amp(0);
     this.noiseComponent.start();
@@ -136,23 +196,22 @@ class ParametricDDSP {
   }
   
   morphTimbre(weights) {
-    this.ampEnvelope = lerp(this.ampEnvelope, 0, 0.04); // Natural note decay profile
+    this.ampEnvelope = lerp(this.ampEnvelope, 0, 0.07); // Slightly faster decay for faster speeds
     
     if (this.currentBaseFreq > 0) {
       for (let i = 0; i < this.numHarmonics; i++) {
         this.harmonics[i].freq(this.currentBaseFreq * (i + 1));
-        let targetingAmp = weights[i] * 0.16 * this.ampEnvelope;
-        this.harmonics[i].amp(targetingAmp, 0.02); // 20ms click prevention smoothing
+        let targetingAmp = weights[i] * 0.15 * this.ampEnvelope;
+        this.harmonics[i].amp(targetingAmp, 0.01); 
       }
-      
       let noiseTargetAmp = weights[4] * 0.03 * this.ampEnvelope;
-      this.noiseComponent.amp(noiseTargetAmp, 0.02);
+      this.noiseComponent.amp(noiseTargetAmp, 0.01);
     }
   }
   
   triggerAttack(midiNote) {
     this.currentBaseFreq = midiToFreq(midiNote);
-    this.ampEnvelope = 1.0; // Peak strike volume
+    this.ampEnvelope = 1.0; 
   }
 }
 
@@ -161,41 +220,30 @@ class Dot {
     this.x = x;
     this.y = y;
     this.baseRadius = 2; 
-    this.glowRadius = 14;  
+    this.glowRadius = 16;  
     this.currentRadius = this.baseRadius;
     this.targetColor = c;  
     this.midiNote = note; 
     this.isGlowing = false;
     this.glowIntensity = 0;
-    this.cooldown = 0;
   }
 
-  checkHover(mx, my) {
-    let d = dist(this.x, this.y, mx, my);
-    
-    if (d < 8 && this.cooldown === 0) {
+  checkAIActivation(currentAINote) {
+    // If the unsupervised partner triggers this specific dot's pitch, execute a flash spike
+    if (this.midiNote === currentAINote) {
       this.isGlowing = true;
-      this.cooldown = 45; 
-
-      if (millis() - lastNoteTime > 35) {
-        ddspEngine.triggerAttack(this.midiNote); 
-        lastNoteTime = millis(); 
-      }
+      this.glowIntensity = 255;
+      this.currentRadius = this.glowRadius;
     }
   }
 
   update() {
-    if (this.isGlowing) {
-      this.glowIntensity = lerp(this.glowIntensity, 255, 0.2);
-      this.currentRadius = lerp(this.currentRadius, this.glowRadius, 0.2);
-    } else {
-      this.glowIntensity = lerp(this.glowIntensity, 0, 0.05);
-      this.currentRadius = lerp(this.currentRadius, this.baseRadius, 0.05);
-    }
-
-    if (this.cooldown > 0) {
-      this.cooldown--;
-      if (this.cooldown === 0) this.isGlowing = false;
+    // Smoothly decay the flash glow back down over time
+    this.glowIntensity = lerp(this.glowIntensity, 0, 0.12);
+    this.currentRadius = lerp(this.currentRadius, this.baseRadius, 0.12);
+    
+    if (this.glowIntensity < 1) {
+      this.isGlowing = false;
     }
   }
 
@@ -207,32 +255,31 @@ class Dot {
     let sizeModifier = 1.0;
     
     let d = dist(this.x, this.y, mx, my);
-    let gravityRadius = 160; 
+    let gravityRadius = 140; 
     
     if (d < gravityRadius) {
-      let pullFactor = sin(map(d, 0, gravityRadius, 0, PI)) * 12; 
+      let pullFactor = sin(map(d, 0, gravityRadius, 0, PI)) * 14; 
       let angle = atan2(my - this.y, mx - this.x);
       
       renderX += cos(angle) * pullFactor;
       renderY += sin(angle) * pullFactor;
-      
-      sizeModifier = map(d, 0, gravityRadius, 0.5, 1.0);
+      sizeModifier = map(d, 0, gravityRadius, 0.4, 1.0);
     }
 
     let displayGlowRadius = this.currentRadius * sizeModifier;
     let displayBaseRadius = this.baseRadius * sizeModifier;
 
-    if (this.glowIntensity > 5) {
+    if (this.glowIntensity > 2) {
       let c = color(this.targetColor);
-      c.setAlpha(this.glowIntensity * 0.4); 
+      c.setAlpha(this.glowIntensity * 0.5); 
       fill(c);
       ellipse(renderX, renderY, displayGlowRadius * 2);
     }
 
-    if (this.glowIntensity > 150) {
+    if (this.glowIntensity > 100) {
       fill(this.targetColor); 
     } else {
-      fill(0); 
+      fill(0, 0, 20); 
     }
     
     ellipse(renderX, renderY, displayBaseRadius * 2);
@@ -240,14 +287,14 @@ class Dot {
 }
 
 function drawTelemetryHUD() {
-  fill(0, 0, 15, 200);
-  rect(15, 15, 320, 135, 8);
+  fill(0, 0, 15, 220);
+  rect(15, 15, 340, 155, 8);
   
   fill(0, 0, 100);
   noStroke();
-  textSize(11);
+  textSize(10);
   textFont('Courier New');
-  text("RADIAL HARMONIC TIMBRE NAVIGATION", 25, 35);
+  text("UNSUPERVISED MARKOV MATRIX AI JAM PARTNER", 25, 35);
   
   let centerX = width / 2;
   let centerY = height / 2;
@@ -255,26 +302,27 @@ function drawTelemetryHUD() {
   let currentDist = dist(mouseX, mouseY, centerX, centerY);
   let normRadialDist = constrain(currentDist / maxRadius, 0, 1);
   
-  text(`Radial Position: ${(normRadialDist * 100).toFixed(1)}% from Center`, 25, 55);
+  text(`AI Generative Tempo Clock: ${currentTempo}ms`, 25, 55);
+  text(`Active Musical Target Frequency: ${midiToFreq(activeMidiNote).toFixed(1)} Hz`, 25, 75);
   
   if (normRadialDist <= 0.40) {
     fill(140, 85, 95);
-    text("CURRENT ZONE: CORE SAFE ZONE (Base Tones)", 25, 75);
+    text("MATRIX STATE: CONSONANT MELODIC COHESION (0% ENTROPY)", 25, 95);
   } else {
+    let entropy = map(normRadialDist, 0.40, 1.0, 0, 100);
     fill(15, 85, 95);
-    text("CURRENT ZONE: HARMONIC EXPANSION EDGE", 25, 75);
+    text(`MATRIX STATE: PROBABILISTIC CHAOS (${entropy.toFixed(0)}% ENTROPY)`, 25, 95);
   }
   
   fill(0, 0, 100);
-  text("Active DDSP Harmonic Modifiers:", 25, 102);
+  text("Active Timbre Synth Weight Array Map:", 25, 122);
   
   for(let i = 0; i < currentTimbreWeights.length; i++) {
-    let barWidth = currentTimbreWeights[i] * 45;
+    let barWidth = currentTimbreWeights[i] * 50;
+    if (i === 4) fill(0, 80, 90); 
+    else fill(i * 45 + 190, 85, 95); 
     
-    if (i === 4) fill(0, 80, 90); // Residual edge noise
-    else fill(i * 45 + 200, 85, 95); // Harmonics 1x, 2x, 3x, 4x
-    
-    rect(25 + (i * 58), 112, barWidth, 10, 2);
+    rect(25 + (i * 63), 132, barWidth, 10, 2);
   }
 }
 
