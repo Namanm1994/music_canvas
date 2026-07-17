@@ -62,22 +62,22 @@ function setup() {
 }
 
 function draw() {
-  background(0, 0, 100); 
+  background(0, 0, 8); // Shifted background deeper to maximize 3D contrast contrast
 
   // 1. Process Keyboard State Interpolations
   if (keyIsDown(SHIFT)) {
-    tapeStopValue = lerp(tapeStopValue, 0.0, 0.12); // Slowly stop tape
+    tapeStopValue = lerp(tapeStopValue, 0.0, 0.12); 
   } else {
-    tapeStopValue = lerp(tapeStopValue, 1.0, 0.08); // Spin tape back up
+    tapeStopValue = lerp(tapeStopValue, 1.0, 0.08); 
   }
 
   let glitchActive = keyIsDown(32); // Spacebar
   if (glitchActive) {
     if (!wasGlitching) {
-      glitchLockedStep = currentStep; // Lock current sequencer position
+      glitchLockedStep = currentStep; 
       wasGlitching = true;
     }
-    currentTempo = 55; // Force blistering 16th-note roll speed
+    currentTempo = 55; 
   } else {
     wasGlitching = false;
   }
@@ -85,24 +85,23 @@ function draw() {
   // Decay the visual kick flash
   globalKickPulse = lerp(globalKickPulse, 0, 0.12);
 
-  // 2. Warp Matrix & Synth settings (passing Tape Stop modifier directly)
+  // 2. Warp Matrix & Synth settings
   let chaos = warpMatrixAndTimbre();
 
-  // 3. Continuously update analog drum decay models with Tape Stop pitch shift
+  // 3. Continuously update drum envelopes
   drumEngine.update(tapeStopValue);
 
   // 4. Dynamic Master Step Clock
   let stepDuration = currentTempo;
   if (keyIsDown(SHIFT)) {
-    // Slow down rhythm engine to a complete crawl alongside the tape stop sweep
     stepDuration = currentTempo / (tapeStopValue + 0.05); 
   }
 
   if (millis() - lastStepTime > stepDuration) {
     if (glitchActive) {
-      currentStep = glitchLockedStep; // Lock beat sequence onto repeat step
+      currentStep = glitchLockedStep; 
     } else {
-      currentStep = (currentStep + 1) % 16; // Normal progression
+      currentStep = (currentStep + 1) % 16; 
     }
     
     aiPlayNextMelodyNote();
@@ -121,7 +120,7 @@ function draw() {
     dot.display(mouseX, mouseY, glitchActive); 
   }
   
-  // 7. Render Extended Dashboard (passing FX state flags)
+  // 7. Render Extended Dashboard
   drawTelemetryHUD(chaos, glitchActive);
 }
 
@@ -173,7 +172,6 @@ function warpMatrixAndTimbre() {
     currentTimbreWeights[4] = edgeFactor > 0.6 ? map(edgeFactor, 0.6, 1.0, 0.0, 0.5) : 0.0;
   }
   
-  // Update synthesis engine, scaling overall output amplitude down if Tape Stop is engaged
   ddspEngine.morphTimbre(currentTimbreWeights, tapeStopValue);
   return chaosFactor;
 }
@@ -202,7 +200,6 @@ function aiProcessDrumStep(chaosFactor) {
   let playSnare = false;
   let playHat = false;
 
-  // Baseline Techno Grid Pattern
   if (currentStep === 0 || currentStep === 4 || currentStep === 8 || currentStep === 12) {
     playKick = true; 
   }
@@ -213,7 +210,6 @@ function aiProcessDrumStep(chaosFactor) {
     playHat = true; 
   }
 
-  // Dynamic Breakbeat Mutations
   if (chaosFactor > 0.05) {
     if (currentStep === 10 && random() < chaosFactor * 0.8) playKick = true;
     if (currentStep === 15 && random() < chaosFactor * 0.6) playKick = true;
@@ -221,7 +217,6 @@ function aiProcessDrumStep(chaosFactor) {
     if (random() < chaosFactor * 0.65) playHat = true;
   }
 
-  // Trigger sound engine impulses
   if (playKick) {
     drumEngine.triggerKick();
     globalKickPulse = 1.0; 
@@ -241,9 +236,9 @@ function drawRadialGuidelines() {
   let safeZoneDiameter = maxRadius * 0.40 * 2;
   
   noFill();
-  stroke(0, 0, 85, 120);
-  strokeWeight(1);
-  drawingContext.setLineDash([4, 4]); 
+  stroke(0, 0, 30, 150); // Deepened frame overlay lines
+  strokeWeight(1.5);
+  drawingContext.setLineDash([6, 6]); 
   ellipse(centerX, centerY, safeZoneDiameter);
   drawingContext.setLineDash([]); 
 }
@@ -275,9 +270,7 @@ class ParametricDDSP {
     
     if (this.currentBaseFreq > 0) {
       for (let i = 0; i < this.numHarmonics; i++) {
-        // Dynamic tape speed drop lowers pitch frequency proportionally
         this.harmonics[i].freq(this.currentBaseFreq * (i + 1) * tapeStop);
-        
         let targetingAmp = weights[i] * 0.12 * this.ampEnvelope * tapeStop;
         this.harmonics[i].amp(targetingAmp, 0.01); 
       }
@@ -306,7 +299,6 @@ class SyntheticDrummer {
     this.percussiveNoise.amp(0);
     this.percussiveNoise.start();
 
-    // Sound generation envelope state tracking
     this.kickFreq = 0;
     this.kickAmp = 0;
     this.snareAmp = 0;
@@ -331,9 +323,8 @@ class SyntheticDrummer {
   }
   
   update(tapeStop) {
-    // Frame-rate driven analog kick envelope simulation
     if (this.kickAmp > 0.005) {
-      this.kickFreq = lerp(this.kickFreq, 42, 0.15); // Dynamic sub drop sweep
+      this.kickFreq = lerp(this.kickFreq, 42, 0.15); 
       this.kickAmp = lerp(this.kickAmp, 0, 0.15);
       this.kickOsc.freq(this.kickFreq * tapeStop);
       this.kickOsc.amp(this.kickAmp * tapeStop, 0.01);
@@ -341,7 +332,6 @@ class SyntheticDrummer {
       this.kickOsc.amp(0);
     }
     
-    // Frame-rate driven snare decay envelope
     if (this.snareAmp > 0.005) {
       this.snareAmp = lerp(this.snareAmp, 0, 0.18);
       this.snareOsc.freq(185 * tapeStop);
@@ -350,7 +340,6 @@ class SyntheticDrummer {
       this.snareOsc.amp(0);
     }
     
-    // Snare wires tail and Hi-Hat white noise decay
     if (this.noiseAmp > 0.005) {
       this.noiseAmp = lerp(this.noiseAmp, 0, this.noiseDecay);
       this.percussiveNoise.amp(this.noiseAmp * tapeStop, 0.01);
@@ -364,8 +353,8 @@ class Dot {
   constructor(x, y, c, note) {
     this.x = x;
     this.y = y;
-    this.baseRadius = 2; 
-    this.glowRadius = 16;  
+    this.baseRadius = 2.5; 
+    this.glowRadius = 18;  
     this.currentRadius = this.baseRadius;
     this.targetColor = c;  
     this.midiNote = note; 
@@ -384,10 +373,7 @@ class Dot {
   update() {
     this.glowIntensity = lerp(this.glowIntensity, 0, 0.12);
     this.currentRadius = lerp(this.currentRadius, this.baseRadius, 0.12);
-    
-    if (this.glowIntensity < 1) {
-      this.isGlowing = false;
-    }
+    if (this.glowIntensity < 1) this.isGlowing = false;
   }
 
   display(mx, my, glitchActive) {
@@ -396,51 +382,75 @@ class Dot {
     let renderX = this.x;
     let renderY = this.y;
     let sizeModifier = 1.0;
+    let zHeight = 0; // The virtual Z-depth displacement
     
-    // Active Performance Glitch vibration loop
     if (glitchActive) {
       renderX += random(-2.5, 2.5);
       renderY += random(-2.5, 2.5);
     }
     
     let d = dist(this.x, this.y, mx, my);
-    let gravityRadius = 140; 
+    let lensRadius = 160; // Size of the physical 3D dome boundary
     
-    if (d < gravityRadius) {
-      let pullFactor = sin(map(d, 0, gravityRadius, 0, PI)) * 14; 
-      let angle = atan2(my - this.y, mx - this.x);
+    if (d < lensRadius) {
+      // Create a smooth cosine hemispherical surface height profile (1 at peak, 0 at skirt)
+      let normDist = d / lensRadius;
+      zHeight = cos(normDist * HALF_PI);
       
-      renderX += cos(angle) * pullFactor;
-      renderY += sin(angle) * pullFactor;
-      sizeModifier = map(d, 0, gravityRadius, 0.4, 1.0);
+      // 3D Convex Warp: Push nodes away from the apex center point
+      let pushFactor = sin(normDist * PI) * 24; 
+      let angle = atan2(this.y - my, this.x - mx); 
+      
+      renderX += cos(angle) * pushFactor;
+      renderY += sin(angle) * pushFactor;
+      
+      // Lift elements toward camera viewport along Z-axis (Magnification effect)
+      sizeModifier = map(zHeight, 0, 1, 1.0, 3.4);
     }
 
     let kickVisualMultiplier = 1.0 + (globalKickPulse * 0.45);
-    
     let displayGlowRadius = this.currentRadius * sizeModifier * kickVisualMultiplier;
     let displayBaseRadius = this.baseRadius * sizeModifier * kickVisualMultiplier;
 
+    // 1. RENDER BACK LAYER: Ambient Glow Rings
     if (this.glowIntensity > 2) {
       let c = color(this.targetColor);
-      c.setAlpha(this.glowIntensity * 0.5); 
+      c.setAlpha(this.glowIntensity * 0.4); 
       fill(c);
       ellipse(renderX, renderY, displayGlowRadius * 2);
     }
 
+    // 2. RENDER MID LAYER: Core Node Body with Topographic Shading
     if (this.glowIntensity > 100) {
       fill(this.targetColor); 
+      ellipse(renderX, renderY, displayBaseRadius * 2);
     } else {
-      let backgroundDotBrightness = map(globalKickPulse, 0, 1, 20, 35);
-      fill(0, 0, backgroundDotBrightness); 
+      // Static background dots dynamically illuminate as they climb the 3D dome surface
+      let baseBrightness = map(globalKickPulse, 0, 1, 20, 32);
+      let localizedLighting = baseBrightness + (zHeight * 45); 
+      
+      fill(0, 0, localizedLighting); 
+      ellipse(renderX, renderY, displayBaseRadius * 2);
     }
     
-    ellipse(renderX, renderY, displayBaseRadius * 2);
+    // 3. RENDER FRONT LAYER: Pseudo-3D Glossy Specular Light Highlight Reflection
+    // Layering an offset white dot transforms flat canvas graphics into micro-spherical glass beads
+    let highlightSize = displayBaseRadius * 0.55;
+    let highlightOffset = displayBaseRadius * 0.35;
+    
+    if (this.glowIntensity > 100) {
+      fill(0, 0, 100, 180); // White highlight overlaying glowing note
+    } else {
+      let highlightAlpha = map(zHeight, 0, 1, 40, 160); // Highlights catch stronger light on dome crests
+      fill(0, 0, 100, highlightAlpha);
+    }
+    ellipse(renderX - highlightOffset, renderY - highlightOffset, highlightSize);
   }
 }
 
 function drawTelemetryHUD(chaosFactor, glitchActive) {
-  fill(0, 0, 15, 230);
-  rect(15, 15, 360, 195, 8); // Expanded box to fit performance statuses
+  fill(0, 0, 12, 230);
+  rect(15, 15, 360, 195, 8); 
   
   fill(0, 0, 100);
   noStroke();
@@ -451,7 +461,6 @@ function drawTelemetryHUD(chaosFactor, glitchActive) {
   text(`Master Step Clock Interval: ${currentTempo}ms`, 25, 55);
   text(`Melody Pitch Target Vector: ${midiToFreq(activeMidiNote).toFixed(1)} Hz`, 25, 75);
   
-  // Sequencer Step Visualization
   let stepGridString = "DRUM STATE: [ ";
   for (let i = 0; i < 16; i++) {
     if (i === currentStep) {
@@ -476,7 +485,6 @@ function drawTelemetryHUD(chaosFactor, glitchActive) {
   text(stepGridString, 25, 120);
   text("Active Timbre Additive Synthesis Weight Map:", 25, 142);
   
-  // Render Synth Harmonic Weight Bars
   for(let i = 0; i < currentTimbreWeights.length; i++) {
     let barWidth = currentTimbreWeights[i] * 50;
     if (i === 4) fill(0, 80, 90); 
@@ -485,7 +493,6 @@ function drawTelemetryHUD(chaosFactor, glitchActive) {
     rect(25 + (i * 65), 152, barWidth, 10, 2);
   }
 
-  // Draw active performance state alerts in real time
   if (glitchActive) {
     fill(0, 95, 95); 
     text("PERFORMANCE ALERT : [ SPACE ] STUTTER BUFFER LOCK ENABLED", 25, 185);
