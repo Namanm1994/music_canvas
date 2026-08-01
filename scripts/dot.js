@@ -54,9 +54,19 @@ class Dot {
       sizeModifier = map(zHeight, 0, 1, 1.0, 3.4);
     }
 
+    // --- LIVE AUDIO REACTIVITY ---
+    // Map this dot's column to a bin of the live spectrum, so the grid
+    // physically swells and brightens with whatever is currently sounding.
+    let audioEnergy = 0;
+    if (typeof audioSpectrum !== 'undefined' && audioSpectrum.length > 0) {
+      let bin = floor(map(this.x, 0, width, 0, audioSpectrum.length - 1, true));
+      audioEnergy = audioSpectrum[bin] / 255; // normalized 0..1
+    }
+    let audioSizeMultiplier = 1.0 + (audioEnergy * 0.9);
+
     let kickVisualMultiplier = 1.0 + (globalKickPulse * 0.45);
-    let displayGlowRadius = this.currentRadius * sizeModifier * kickVisualMultiplier;
-    let displayBaseRadius = this.baseRadius * sizeModifier * kickVisualMultiplier;
+    let displayGlowRadius = this.currentRadius * sizeModifier * kickVisualMultiplier * audioSizeMultiplier;
+    let displayBaseRadius = this.baseRadius * sizeModifier * kickVisualMultiplier * audioSizeMultiplier;
 
     // 1. Ambient Glow Rings
     if (this.glowIntensity > 2) {
@@ -72,9 +82,10 @@ class Dot {
       ellipse(renderX, renderY, displayBaseRadius * 2);
     } else {
       let baseBrightness = map(globalKickPulse, 0, 1, 20, 32);
-      let localizedLighting = baseBrightness + (zHeight * 45); 
-      
-      fill(0, 0, localizedLighting); 
+      let localizedLighting = baseBrightness + (zHeight * 45) + (audioEnergy * 40);
+      localizedLighting = min(localizedLighting, 100);
+
+      fill(0, 0, localizedLighting);
       ellipse(renderX, renderY, displayBaseRadius * 2);
     }
     
