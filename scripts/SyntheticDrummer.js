@@ -16,9 +16,20 @@ class SyntheticDrummer {
     this.kickAmp = 0;
     this.snareAmp = 0;
     this.noiseAmp = 0;
-    this.noiseDecay = 0.2; 
+    this.noiseDecay = 0.2;
   }
-  
+
+  // Route the drum voices into a shared destination (the master FX bus) instead
+  // of the default main output, so they share the same reverb/delay space.
+  connectTo(destination) {
+    this.kickOsc.disconnect();
+    this.kickOsc.connect(destination);
+    this.snareOsc.disconnect();
+    this.snareOsc.connect(destination);
+    this.percussiveNoise.disconnect();
+    this.percussiveNoise.connect(destination);
+  }
+
   triggerKick() {
     this.kickFreq = 160;
     this.kickAmp = 0.85;
