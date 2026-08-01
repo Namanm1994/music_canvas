@@ -1,6 +1,13 @@
 let dots = [];
 let ddspEngine;
-let drumEngine; 
+let drumEngine;
+
+// --- MASTER AUDIO FX BUS + LIVE ANALYSER ---
+let masterBus;             // all voices sum here before hitting the speakers
+let reverb;                // shared ambience / space
+let delay;                 // rhythmic echoes
+let fft;                   // spectrum analyser tapping the master bus
+let audioSpectrum = [];    // latest per-bin amplitudes (0..255), refreshed each frame
 
 // --- SHARED MASTER TIME CLOCK ---
 let lastStepTime = 0;      
@@ -28,7 +35,30 @@ function setup() {
   
   ddspEngine = new ParametricDDSP();
   drumEngine = new SyntheticDrummer();
-  
+
+  // --- MASTER FX BUS (reverb + delay) ---
+  // Sum every synth + drum voice into one gain bus, then process the whole mix
+  // through space-adding effects instead of leaving each voice bone-dry.
+  masterBus = new p5.Gain();
+  masterBus.connect();               // dry signal goes straight to the speakers
+  ddspEngine.connectTo(masterBus);
+  drumEngine.connectTo(masterBus);
+
+  reverb = new p5.Reverb();
+  reverb.process(masterBus, 3.5, 2); // 3.5s tail, moderate decay
+  reverb.drywet(1.0);                // wet-only; the dry path is already direct
+  reverb.amp(0.55);
+
+  delay = new p5.Delay();
+  delay.process(masterBus, 0.18, 0.38, 2300); // short echo, filtered feedback
+  delay.drywet(1.0);
+  delay.amp(0.4);
+
+  // --- LIVE SPECTRUM ANALYSER ---
+  // Tap the master bus so the visuals react to the actual audio output.
+  fft = new p5.FFT(0.8, 64);
+  fft.setInput(masterBus);
+
   for (let i = 0; i < musicalScale.length; i++) {
     transitionMatrix[i] = new Array(musicalScale.length).fill(0);
   }
@@ -83,6 +113,9 @@ function draw() {
   let chaos = warpMatrixAndTimbre();
   drumEngine.update(tapeStopValue);
 
+  // Sample the live output spectrum so the dot grid can react to it this frame.
+  audioSpectrum = fft.analyze();
+
   let stepDuration = currentTempo;
   if (keyIsDown(SHIFT)) {
     stepDuration = currentTempo / (tapeStopValue + 0.05); 
@@ -110,115 +143,4 @@ function draw() {
   }
   
   drawTelemetryHUD(chaos, glitchActive);
-}
-
-function warpMatrixAndTimbre() {
-  let centerX = width / 2;
-  let centerY = height / 2;
-  let maxRadius = dist(0, 0, centerX, centerY);
-  let currentDist = dist(mouseX, mouseY, centerX, centerY);
-  
-  let normRadialDist = constrain(currentDist / maxRadius, 0.0, 1.0);
-  let safeZoneThreshold = 0.40;
-  
-  let chaosFactor = 0;
-  if (normRadialDist <= safeZoneThreshold) {
-    currentTempo = 380; 
-    chaosFactor = 0.0;
-  } else {
-    let edgeFactor = map(normRadialDist, safeZoneThreshold, 1.0, 0.0, 1.0);
-    currentTempo = map(edgeFactor, 0.0, 1.0, 380, 95); 
-    chaosFactor = edgeFactor;
-  }
-
-  for (let i = 0; i < musicalScale.length; i++) {
-    let rowTotal = 0;
-    for (let j = 0; j < musicalScale.length; j++) {
-      let structuralProb = 0;
-      if (abs(i - j) === 1 || abs(i - j) === 3) structuralProb = 0.8;
-      if (i === j) structuralProb = 0.1; 
-      
-      let randomProb = 1.0 / musicalScale.length;
-      transitionMatrix[i][j] = lerp(structuralProb, randomProb, chaosFactor);
-      rowTotal += transitionMatrix[i][j];
-    }
-    for (let j = 0; j < musicalScale.length; j++) {
-      transitionMatrix[i][j] /= rowTotal;
-    }
-  }
-
-  if (normRadialDist <= safeZoneThreshold) {
-    currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0];
-  } else {
-    let edgeFactor = map(normRadialDist, safeZoneThreshold, 1.0, 0.0, 1.0);
-    currentTimbreWeights[0] = 1.0 - (edgeFactor * 0.4);
-    currentTimbreWeights[1] = constrain(map(edgeFactor, 0.0, 0.5, 0.0, 1.0), 0.0, 1.0);
-    currentTimbreWeights[2] = constrain(map(edgeFactor, 0.2, 0.8, 0.0, 1.0), 0.0, 1.0);
-    currentTimbreWeights[3] = constrain(map(edgeFactor, 0.5, 1.0, 0.0, 1.0), 0.0, 1.0);
-    currentTimbreWeights[4] = edgeFactor > 0.6 ? map(edgeFactor, 0.6, 1.0, 0.0, 0.5) : 0.0;
-  }
-  
-  ddspEngine.morphTimbre(currentTimbreWeights, tapeStopValue);
-  return chaosFactor;
-}
-
-function aiPlayNextMelodyNote() {
-  let probabilities = transitionMatrix[currentNoteIndex];
-  let r = random(1.0);
-  let cumulativeProbability = 0;
-  let nextIndex = 0;
-  
-  for (let i = 0; i < probabilities.length; i++) {
-    cumulativeProbability += probabilities[i];
-    if (r <= cumulativeProbability) {
-      nextIndex = i;
-      break;
-    }
-  }
-  
-  currentNoteIndex = nextIndex;
-  activeMidiNote = musicalScale[currentNoteIndex];
-  ddspEngine.triggerAttack(activeMidiNote);
-}
-
-function aiProcessDrumStep(chaosFactor) {
-  let playKick = false;
-  let playSnare = false;
-  let playHat = false;
-
-  if (currentStep === 0 || currentStep === 4 || currentStep === 8 || currentStep === 12) {
-    playKick = true; 
-  }
-  if (currentStep === 4 || currentStep === 12) {
-    playSnare = true; 
-  }
-  if (currentStep % 4 === 2) {
-    playHat = true; 
-  }
-
-  if (chaosFactor > 0.05) {
-    if (currentStep === 10 && random() < chaosFactor * 0.8) playKick = true;
-    if (currentStep === 15 && random() < chaosFactor * 0.6) playKick = true;
-    if ((currentStep === 6 || currentStep === 14) && random() < chaosFactor * 0.9) playSnare = true;
-    if (random() < chaosFactor * 0.65) playHat = true;
-  }
-
-  if (playKick) {
-    drumEngine.triggerKick();
-    globalKickPulse = 1.0; 
-  }
-  if (playSnare) {
-    drumEngine.triggerSnare();
-  }
-  if (playHat) {
-    drumEngine.triggerHiHat(chaosFactor);
-  }
-}
-
-function mousePressed() {
-  userStartAudio(); 
-}
-
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
 }
