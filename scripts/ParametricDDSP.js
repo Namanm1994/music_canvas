@@ -17,7 +17,18 @@ class ParametricDDSP {
     this.currentBaseFreq = 0;
     this.ampEnvelope = 0;
   }
-  
+
+  // Route every voice into a shared destination (the master FX bus) instead of
+  // the default main output, so the whole synth can be processed by reverb/delay.
+  connectTo(destination) {
+    for (let i = 0; i < this.numHarmonics; i++) {
+      this.harmonics[i].disconnect();
+      this.harmonics[i].connect(destination);
+    }
+    this.noiseComponent.disconnect();
+    this.noiseComponent.connect(destination);
+  }
+
   morphTimbre(weights, tapeStop) {
     this.ampEnvelope = lerp(this.ampEnvelope, 0, 0.07); 
     
