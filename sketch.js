@@ -39,6 +39,10 @@ let CONFIG = { seed: 1, tempo: 380, spacing: 12, reverb: 0.55, delay: 0.4 };
 let toastMessage = '';
 let toastFadeTime = 0;
 
+// --- ECHO GAME MODE ---
+let echoGame;                     // EchoGame instance (AI memory duel)
+let gameMode = false;             // true = playing Echo, false = ambient free-play
+
 // --- SYNTH PARAMETERS ---
 let currentTimbreWeights = [1.0, 0.0, 0.0, 0.0, 0.0];
 
@@ -92,6 +96,9 @@ function setup() {
   // Tap the master bus so the visuals react to the actual audio output.
   fft = new p5.FFT(0.8, 64);
   fft.setInput(masterBus);
+
+  // --- ECHO GAME ---
+  echoGame = new EchoGame();
 
   for (let i = 0; i < musicalScale.length; i++) {
     transitionMatrix[i] = new Array(musicalScale.length).fill(0);
@@ -150,22 +157,28 @@ function draw() {
   // Sample the live output spectrum so the dot grid can react to it this frame.
   audioSpectrum = fft.analyze();
 
-  let stepDuration = currentTempo;
-  if (keyIsDown(SHIFT)) {
-    stepDuration = currentTempo / (tapeStopValue + 0.05);
-  }
-
-  if (millis() - lastStepTime > stepDuration) {
-    if (glitchActive) {
-      currentStep = glitchLockedStep;
-    } else {
-      currentStep = (currentStep + 1) % 16;
+  if (gameMode) {
+    // Echo drives the notes; the ambient generative sequencer is paused.
+    echoGame.update();
+  } else {
+    // Ambient generative sequencer (free-play).
+    let stepDuration = currentTempo;
+    if (keyIsDown(SHIFT)) {
+      stepDuration = currentTempo / (tapeStopValue + 0.05);
     }
 
-    aiPlayNextMelodyNote();
-    aiProcessDrumStep(chaos);
+    if (millis() - lastStepTime > stepDuration) {
+      if (glitchActive) {
+        currentStep = glitchLockedStep;
+      } else {
+        currentStep = (currentStep + 1) % 16;
+      }
 
-    lastStepTime = millis();
+      aiPlayNextMelodyNote();
+      aiProcessDrumStep(chaos);
+
+      lastStepTime = millis();
+    }
   }
 
   drawRadialGuidelines();
@@ -176,7 +189,11 @@ function draw() {
     dot.display(mouseX, mouseY, glitchActive);
   }
 
-  drawTelemetryHUD(chaos, glitchActive);
+  if (gameMode) {
+    echoGame.render();
+  } else {
+    drawTelemetryHUD(chaos, glitchActive);
+  }
   drawToast();
 }
 
@@ -308,9 +325,42 @@ function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
 
-// --- KEY CONTROLS: share / reseed ---
+// --- KEY CONTROLS ---
+// ENTER toggles into / (re)starts the Echo game; ESC exits back to free-play.
+// In free-play: C copies the shareable link, R reseeds.
 // (SPACE and SHIFT are handled continuously via keyIsDown in draw().)
 function keyPressed() {
+  userStartAudio(); // a keypress is a valid gesture to unlock the audio context
+
+  // Enter / start / restart Echo.
+  if (keyCode === ENTER || keyCode === RETURN) {
+    if (!gameMode) {
+      gameMode = true;
+      echoGame.start();
+    } else {
+      echoGame.onEnter();
+    }
+    return false;
+  }
+
+  // Exit Echo back to free-play.
+  if (keyCode === ESCAPE) {
+    if (gameMode) {
+      gameMode = false;
+      echoGame.reset();
+      activeMidiNote = -1;
+    }
+    return false;
+  }
+
+  // While in the game, letter keys are gameplay input (swallow everything else).
+  if (gameMode) {
+    let k = (typeof key === 'string') ? key.toLowerCase() : '';
+    echoGame.handleKey(k);
+    return false;
+  }
+
+  // Free-play controls.
   if (key === 'c' || key === 'C') {
     const url = getShareURL();
     if (navigator.clipboard && navigator.clipboard.writeText) {
